@@ -1,4 +1,5 @@
 <?php
+
 /**
  * CKIPClient.php
  *
@@ -11,173 +12,181 @@
  * @version  Release: <1.0>
  * @link     http://fukuball@github.com
  */
+class CKIPClient {
+    private $test;
+    private $server_ip;
+    private $server_port;
+    private $username;
+    private $password;
 
-class CKIPClient
-{
+    public $raw_text;
+    public $return_text;
+    public $sentence = array();
+    public $term = array();
 
-   private $server_ip;
-   private $server_port;
-   private $username;
-   private $password;
+    /**
+     * Method __construct initialize instance
+     *
+     * @return void
+     */
+    public function __construct ($server_ip, $server_port, $username, $password)
+    {
 
-   public  $raw_text;
-   public  $return_text;
-   public  $sentence = array();
-   public  $term = array();
+        $this->server_ip = $server_ip;
+        $this->server_port = $server_port;
+        $this->username = $username;
+        $this->password = $password;
 
-   /**
-    * Method __construct initialize instance
-    *
-    * @return void
-    */
-   public function __construct($server_ip, $server_port, $username, $password)
-   {
+    }// end function __construct
 
-      $this->server_ip = $server_ip;
-      $this->server_port = $server_port;
-      $this->username = $username;
-      $this->password = $password;
+    /**
+     * Method send
+     *
+     * @param string $raw_text
+     *
+     * @return string $return_text
+     */
+    public function send ($raw_text)
+    {
 
-   }// end function __construct
+        if (! empty($raw_text))
+        {
 
-   /**
-    * Method send
-    *
-    * @param string $raw_text
-    *
-    * @return string $return_text
-    */
-   public function send($raw_text)
-   {
+            $this->raw_text = $raw_text;
 
-      if (!empty($raw_text)) {
+            $xw = new xmlWriter();
+            $xw->openMemory();
 
-         $this->raw_text = $raw_text;
+            $xw->startDocument('1.0');
 
-         $xw = new xmlWriter();
-         $xw->openMemory();
+            $xw->startElement('wordsegmentation');
+            $xw->writeAttribute('version', '0.1');
+            $xw->startElement('option');
+            $xw->writeAttribute('showcategory', '1');
+            $xw->endElement();
 
-         $xw->startDocument('1.0');
+            $xw->startElement('authentication');
+            $xw->writeAttribute('username', $this->username);
+            $xw->writeAttribute('password', $this->password);
+            $xw->endElement();
 
-         $xw->startElement('wordsegmentation');
-         $xw->writeAttribute('version', '0.1');
-         $xw->startElement('option');
-         $xw->writeAttribute('showcategory', '1');
-         $xw->endElement();
+            $xw->startElement('text');
+            $xw->writeRaw($this->raw_text);
+            $xw->endElement();
 
-         $xw->startElement('authentication');
-         $xw->writeAttribute('username', $this->username);
-         $xw->writeAttribute('password', $this->password);
-         $xw->endElement();
+            $xw->endElement();
 
-         $xw->startElement('text');
-         $xw->writeRaw($this->raw_text);
-         $xw->endElement();
+            $message = iconv("utf-8", "big5", $xw->outputMemory(true));
 
-         $xw->endElement();
+            //send message to CKIP server
+            set_time_limit(60);
 
-         $message = iconv("utf-8", "big5", $xw->outputMemory(true));
+            $protocol = getprotobyname("tcp");
+            $socket = socket_create(AF_INET, SOCK_STREAM, $protocol);
+            socket_connect($socket, $this->server_ip, $this->server_port);
+            socket_write($socket, $message);
+            $this->return_text = iconv("big5", "utf-8", socket_read($socket, strlen($message) * 3));
 
-         //send message to CKIP server
-         set_time_limit(60);
+            socket_shutdown($socket);
+            socket_close($socket);
 
-         $protocol = getprotobyname("tcp");
-         $socket = socket_create(AF_INET, SOCK_STREAM, $protocol);
-         socket_connect($socket, $this->server_ip, $this->server_port);
-         socket_write($socket, $message);
-         $this->return_text = iconv("big5", "utf-8", socket_read($socket, strlen($message)*3));
+        }
 
-         socket_shutdown($socket);
-         socket_close($socket);
+        return $this->return_text;
 
-      }
+    }// end function send
 
-      return $this->return_text;
+    /**
+     * Method getSentence
+     *
+     * @return array $return_sentence
+     */
+    public function getSentence ()
+    {
 
-   }// end function send
+        // empty the array
+        $this->sentence = array();
 
-   /**
-    * Method getSentence
-    *
-    * @return array $return_sentence
-    */
-   public function getSentence()
-   {
+        if ($parse_return_text = simplexml_load_string($this->return_text))
+        {
 
-      // empty the array
-      $this->sentence = array();
+            $sentence_array = $parse_return_text->result->sentence;
 
-      if($parse_return_text = simplexml_load_string($this->return_text)) {
+            foreach ($sentence_array as $key => $sentence)
+            {
 
-         $sentence_array = $parse_return_text->result->sentence;
+                $sentence_value = (string) $sentence;
+                // remove invisible characters
+                $check_sentence = preg_replace('/[\x00-\x1F\x80-\xFF]/', '', $sentence_value);
 
-         foreach ($sentence_array as $key => $sentence) {
-
-            $sentence_value = (string) $sentence;
-            // remove invisible characters
-            $check_sentence = preg_replace('/[\x00-\x1F\x80-\xFF]/', '', $sentence_value);
-
-            if (!empty($check_sentence)) {
-               array_push($this->sentence, $sentence_value);
-            }
-
-         }
-
-      }
-
-      return $this->sentence;
-
-   }// end function getSentence
-
-   /**
-    * Method getTerm
-    *
-    * @return array $return_term
-    */
-   public function getTerm() {
-
-      // empty the array
-      $this->term = array();
-
-      $this->getSentence();
-
-      foreach ($this->sentence as $t) {
-
-         foreach (explode("　", $t) as $s) {
-
-            if ($s!="") {
-               preg_match("/(\S*)\((\S*)\)/", $s, $m);
-
-               $this_term_array = array("term"=>$m[1], "tag"=>$m[2]);
-               array_push($this->term, $this_term_array);
+                if (! empty($check_sentence))
+                {
+                    array_push($this->sentence, $sentence_value);
+                }
 
             }
 
-         }
+        }
 
-      }
+        return $this->sentence;
 
-      return $this->term;
+    }// end function getSentence
 
-   }// end function getTerm
+    /**
+     * Method getTerm
+     *
+     * @return array $return_term
+     */
+    public function getTerm ()
+    {
 
-   /**
-    * Method __destruct unset instance value
-    *
-    * @return void
-    */
-   public function __destruct()
-   {
+        // empty the array
+        $this->term = array();
 
-      $class_property_array = get_object_vars($this);
+        $this->getSentence();
 
-      foreach ($class_property_array as $property_key => $property_value) {
+        foreach ($this->sentence as $t)
+        {
 
-         unset($this->$property_key);
+            foreach (explode("　", $t) as $s)
+            {
 
-      }// end foreach
+                if ($s != "")
+                {
+                    preg_match("/(\S*)\((\S*)\)/", $s, $m);
 
-   }// end function __destruct
+                    $this_term_array = array("term" => $m[1], "tag" => $m[2]);
+                    array_push($this->term, $this_term_array);
+
+                }
+
+            }
+
+        }
+
+        return $this->term;
+
+    }// end function getTerm
+
+    /**
+     * Method __destruct unset instance value
+     *
+     * @return void
+     */
+    public function __destruct ()
+    {
+
+        $class_property_array = get_object_vars($this);
+
+        foreach ($class_property_array as $property_key => $property_value)
+        {
+
+            unset($this->$property_key);
+
+        }// end foreach
+
+    }// end function __destruct
 
 }
+
 ?>
